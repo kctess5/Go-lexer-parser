@@ -85,9 +85,7 @@ func lexStart(l *Lexer) stateFn {
 }
 
 func (l *Lexer) error(err string) stateFn {
-	t := l.getToken(tokenError)
-
-	fmt.Println("Error Parsing Token", t)
+	fmt.Println("Error Parsing Token")
 	fmt.Println("Failed with error:", err)
 
 	return nil

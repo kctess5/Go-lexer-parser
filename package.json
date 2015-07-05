@@ -1,0 +1,18 @@
+{
+  "name": "Go-lex-parse",
+  "description": "Toy Lexer/Parser",
+  "author": {
+    "name": "Corey Walsh",
+    "email": "coreyhwalsh@gmail.com"
+  },
+  "devDependencies": {
+    "npm-watch": "0.0.0"
+  },
+  "scripts": {
+    "go": "go run parse.go",
+    "watch": "npm-watch"
+  },
+  "watch": {
+    "go": "parse.go"
+  }
+}
