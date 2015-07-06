@@ -16,9 +16,15 @@ combinator, and a set of grammar that defines and can test simple
 mathematic operations.
 
 ```go
-log(expression("1+2+3"))       // true
-log(expression("1+2+3+"))      // false
-log(expression("1+(1+(1+1))")) // true
+log(isValid(expression, "1+2+3"))       // true
+log(isValid(expression, "1+2+3+"))      // false
+log(isValid(expression, "1+(1+(1+1))")) // true
+```
+
+Run with:
+
+```
+$ go run parse.go
 ```
 
 hats off to [The Orange Duck](http://theorangeduck.com/page/you-could-have-invented-parser-combinators) for inspiration

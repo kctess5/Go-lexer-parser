@@ -208,7 +208,7 @@ func expression(s string) (bool, string) {
 
 /////////////////////////// Main ///////////////////////////////
 
-func isValid(s string, rule Parser) bool {
+func isValid(rule Parser, s string) bool {
 	matches, remainder := rule(s)
 	return matches && len(remainder) == 0
 }
@@ -216,7 +216,7 @@ func isValid(s string, rule Parser) bool {
 func main() {
 	log := fmt.Println
 
-	log(expression("1+2+3"))       // true
-	log(expression("1+2+3+"))      // false
-	log(expression("1+(1+(1+1))")) // true
+	log(isValid(expression, "1+2+3"))       // true
+	log(isValid(expression, "1+2+3+"))      // false
+	log(isValid(expression, "1+(1+(1+1))")) // true
 }
