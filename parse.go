@@ -1,161 +1,222 @@
 package main
 
-import (
-	"./lex"
-	"fmt"
-)
+import "fmt"
 
-type strategy func([]*Expression) Expression
+//////////////////// String Parser Combinators ///////////////////////
 
-type Operator struct {
-	str    string
-	handle strategy
-}
+/*
+	These string parsers take a string as an input, and return true or
+	false depending on if that parser matches the input string. The
+	parser also returns the remaining parts of the string - if it
+	matched, the matching substring is removed, otherwise, the string
+	is returned unchanged.
+*/
 
-var Operators = map[string]Operator{
-	"+":  Operator{str: "+"},
-	"-":  Operator{str: "-"},
-	"**": Operator{str: "**"},
-	"^^": Operator{str: "^^"},
-	"/":  Operator{str: "/"},
-	"-:": Operator{str: "-:"},
-	// "-":    tokenOperator,
-	// "*":    tokenOperator,
-	// "**":   tokenOperator,
-	// "^^":   tokenOperator,
-	// "/":    tokenOperator,
-	// "-:":   tokenOperator,
-	// "sum":  tokenOperator,
-	// "prod": tokenOperator,
+type Parser func(string) (bool, string)
+type ParserCombinator func(...Parser) Parser
 
-	// "=":  tokenRelation,
-	// "!=": tokenRelation,
-	// "<":  tokenRelation,
-	// ">":  tokenRelation,
-	// "<=": tokenRelation,
-	// ">=": tokenRelation,
+// matches if the input string equals the given literal
+func is(literal string) Parser {
+	return func(s string) (bool, string) {
 
-	// "and": tokenLogical,
-	// "or":  tokenLogical,
-	// "if":  tokenLogical,
-	// "iff": tokenLogical,
-	// "not": tokenLogical,
-	// "=>":  tokenLogical,
+		// string is too short, fail
+		if len(literal) > len(s) {
+			return false, s
+		}
 
-	// "sin":  tokenFunction,
-	// "cos":  tokenFunction,
-	// "tan":  tokenFunction,
-	// "csc":  tokenFunction,
-	// "sec":  tokenFunction,
-	// "cot":  tokenFunction,
-	// "sinh": tokenFunction,
-	// "cosh": tokenFunction,
-	// "tanh": tokenFunction,
-	// "log":  tokenFunction,
-	// "ln":   tokenFunction,
-	// "det":  tokenFunction,
-	// "dim":  tokenFunction,
-	// "lim":  tokenFunction,
-	// "mod":  tokenFunction,
-	// "gcd":  tokenFunction,
-	// "lcm":  tokenFunction,
-	// "min":  tokenFunction,
-	// "max":  tokenFunction,
-}
+		inp := s[0:len(literal)] // substring of correct length
 
-// type tokenTransformer func([]lex.Token) lex.Token
-
-// A pattern is a specification of a single kind of
-// special token pattern. When a pattern matches, it
-// is applied to reduce the size of the linked list
-// representation.
-type Pattern struct {
-	tokens []lex.Token
-}
-
-// type Token struct {
-// 	value string
-// 	typ   tokenType
-// 	pos   int
-// }
-
-// An expression is an abstract syntax tree representing
-// an input string
-type Expression struct {
-	// String representation of the expression
-	raw_input  string
-	Tokens     []lex.Token
-	Components []lex.Component
-
-	// This describes the tree structure. Each expression
-	// forms a node in a tree. The node's children are the
-	// inputs to it's operator - there can arbitrarily many
-	// operator inputs, so long as the operator of that type
-	// understands what to do with the inputs
-	operator       Operator
-	operatorInputs []*Expression
-
-	// This describes all of the possible adornm0ents to an
-	// expression. It forms the state of any given expression
-	// This will all serialize into operatorInputs eventually
-	superscript *Expression
-	subscript   *Expression
-	arguments   *Expression
-}
-
-func (exp Expression) String() string {
-	return exp.raw_input
-}
-
-func (exp *Expression) tokenize() {
-	l := lex.Lex(exp.raw_input)
-
-	for token := range l.Tokens {
-		exp.Tokens = append(exp.Tokens, token)
+		if inp == literal {
+			// is a match, shorten string
+			return true, s[len(literal):]
+		} else {
+			// not a match, fail
+			return false, s
+		}
 	}
 }
 
-func (exp *Expression) reduceTokens() {
-	l := lex.LexTokens(exp.Tokens)
-
-	for component := range l.Components {
-		exp.Components = append(exp.Components, component)
+// matches if any one of the given parsers match
+func or(parsers ...Parser) Parser {
+	return func(s string) (bool, string) {
+		for _, parser := range parsers {
+			// test the given parser
+			matches, remainder := parser(s)
+			if matches {
+				// returns once first parser matches, skips rest
+				return true, remainder
+			}
+		}
+		// if it has not returned by now, none of the given parsers
+		// match, fail
+		return false, s
 	}
 }
 
-func newExpression(s string) *Expression {
-	exp := &Expression{raw_input: s}
+// matches if all of the given parsers match
+func and(parsers ...Parser) Parser {
+	return func(s string) (bool, string) {
+		var matches bool
+		var remainder string
 
-	exp.tokenize()
-	exp.reduceTokens()
-	// exp.expandTokenTree()
+		remainder = s
 
-	// signedNumber := Pattern{
-	// 	tokens: []lex.Token{
-	// 		lex.MakeToken("("),
-	// 		lex.MakeToken("("),
-	// 	},
-	// }
+		for _, parser := range parsers {
+			// test each test, sequentially - i.e. the remainder
+			// from the first test is given to the second test, etc
+			matches, remainder = parser(remainder)
 
-	// fmt.Println(signedNumber)
-
-	return exp
+			if !matches {
+				// if any test fails, the whole thing fails
+				return false, s
+			}
+		}
+		// no test failed, match - return the final remainder
+		return true, remainder
+	}
 }
 
-// func reciever(c chan lex.Token) {
-//     for recievedMsg := range c {
-//         fmt.Println("test", recievedMsg)
-//     }
-// }
+/* matches [0...] instances of the given parser, removing all
+   of the matched text. i.e.
+
+    many(is("a"))("aaaaaaa") ==> (true, "")
+*/
+func many(parser Parser) Parser {
+	return func(s string) (bool, string) {
+		var matches bool
+		var remainder string
+
+		remainder = s
+		matches = true
+
+		// keeps iterating until the given parser no longer matches
+		// feed the remainder forward so that it chomps as it goes
+		for matches && len(remainder) > 0 {
+			matches, remainder = parser(remainder)
+		}
+
+		// return whatever remains in the string
+		return true, remainder
+	}
+}
+
+// matches [1...] instances of the given parser
+func oneOrMore(parser Parser) Parser {
+	return and(
+		parser,       // mandatory match
+		many(parser), // 0 or  subsequent matches
+	)
+}
+
+// matches whether or not the given parser activates
+func optional(parser Parser) Parser {
+	return func(s string) (bool, string) {
+		matches, remainder := parser(s)
+
+		if matches {
+			return true, remainder
+		} else {
+			return true, s
+		}
+	}
+}
+
+/////////////////////// Grammar Rules ////////////////////////
+
+/*
+	These are strictly defined grammar rules that describe all
+	allowable configurations of elements within an input string.
+
+	Each rule itself is a parser. The rule can be considered totally
+	fulfulled if the parser returns (true, "")
+
+	'expression' is recursively defined through its use of 'component'
+	Because of this recursive call, these rules must all be wrapped
+	inside of func's. If one were to simply do:
+
+		var expression = and(...)
+
+	then the Go compiler would yell at you for a typechecking loop!
+
+	In our case, this recursion is not a problem because of the
+	or combinator within 'component' - the result is a tree, where
+	all of the components at the leaves of the tree are simply
+	'numbers' and there is no infinite recursive loop.
+*/
+
+// any numeric symbol
+func digit(s string) (bool, string) {
+	return or(
+		is("0"), is("1"), is("2"), is("3"), is("4"),
+		is("5"), is("6"), is("7"), is("8"), is("9"),
+	)(s)
+}
+
+// only sign decorators for numbers
+func sign(s string) (bool, string) {
+	return or(is("+"), is("-"))(s)
+}
+
+// simple math operations
+func operator(s string) (bool, string) {
+	return or(is("*"), is("/"), is("+"), is("-"), is("^"))(s)
+}
+
+/*
+	A signed or unsigned number.
+	If signed, then it must be surrounded by parentheses.
+
+		e.g. 1337 or (-1337) or (+1337)
+
+	Unsigned numbers can use e notation:
+
+		e.g. 1e4
+*/
+func number(s string) (bool, string) {
+	return or(
+		and(
+			oneOrMore(digit),
+			is("e"),
+			oneOrMore(digit),
+		),
+		oneOrMore(digit),
+		and(
+			is("("),
+			optional(sign),
+			oneOrMore(digit),
+			is(")"),
+		),
+	)(s)
+}
+
+// A component is any thing that can go into an expression
+// i.e. anything that can be operated upon by an operator
+func component(s string) (bool, string) {
+	return or(
+		number,
+		and(is("("), expression, is(")")),
+	)(s)
+}
+
+// An expression is a string of components separated by operators
+func expression(s string) (bool, string) {
+	return and(
+		component,
+		many(and(operator, component)),
+	)(s)
+}
+
+/////////////////////////// Main ///////////////////////////////
+
+func isValid(s string, rule Parser) bool {
+	matches, remainder := rule(s)
+	return matches && len(remainder) == 0
+}
 
 func main() {
-	x := newExpression("21+4-(xsy*7) ^3")
-	// x := newExpression("sum_(i=1)^n i^3=((n(n+1))/2)^2")
-	fmt.Println(x)
-	fmt.Println(x.Tokens)
-	fmt.Println(x.Components)
+	log := fmt.Println
 
-	// for _,token := range x.Tokens {
-	// 	fmt.Println(token)
-	// }
+	log(expression("1+2+3"))       // true
+	log(expression("1+2+3+"))      // false
+	log(expression("1+(1+(1+1))")) // true
 }
