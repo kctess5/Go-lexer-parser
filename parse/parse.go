@@ -1,10 +1,9 @@
-package main
+package parse
 
 import (
-	"fmt"
+	// "fmt"
 	"reflect"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"unicode/utf8"
 )
@@ -13,20 +12,8 @@ import (
 	Utils
 */
 
-const prefix = "main"
-const verbose = true
-
-var shorthandGrammar = Grammar{
-	AND:        "true",
-	OR:         "true",
-	LITERAL:    "true",
-	CHARACTER:  "true",
-	REFERENCE:  "true",
-	MANY:       "true",
-	OPTIONAL:   "true",
-	COMPONENT:  "true",
-	EXPRESSION: "true",
-}
+const prefix = "Users/coreywalsh/Documents/Work/Test/go/parse"
+const verbose = false
 
 func nameOf(i interface{}) string {
 	// this is the string of the function that called the function
@@ -51,7 +38,7 @@ func (t Cst) String() string {
 		}
 
 		return output
-	} else if shorthandGrammar.has(t.typ) {
+	} else if grammar.has(t.typ) {
 		// if output
 		output := t.typ
 
@@ -105,14 +92,6 @@ func chooseName(s []string, dflt string) string {
 	}
 }
 
-func rmWhiteSpace(s string) string {
-	s = strings.Replace(s, " ", "", -1)
-	s = strings.Replace(s, "\n", "", -1)
-	s = strings.Replace(s, "\t", "", -1)
-	s = strings.Replace(s, "\r", "", -1)
-	return s
-}
-
 //////////////////// String Parser Combinators ///////////////////////
 
 /*
@@ -143,7 +122,6 @@ type Cst struct {
 	typ      string
 	children []*Cst
 	value    string
-	test     []string
 }
 
 func Ast(name string, optionalChildren ...[]*Cst) *Cst {
@@ -161,10 +139,6 @@ func (a *Cst) addChild(child *Cst) {
 	a.children = append(a.children, child)
 }
 
-func (a *Cst) nthChild(n int) *Cst {
-	return a.children[n]
-}
-
 // matches if the input string equals the given literal
 func Wildcard(except string) Parser {
 	return func(s string, n ...string) (bool, string, *Cst) {
@@ -176,7 +150,6 @@ func Wildcard(except string) Parser {
 		if w == 0 || strings.ContainsRune(except, r) {
 			return false, s, nil
 		} else {
-			node.value = string(r)
 			return true, s[w:], node
 		}
 
@@ -345,9 +318,16 @@ func (g Grammar) has(i string) bool {
 	}
 }
 
-func (g Grammar) Rule(s string) string {
-	rule := g[s]
-	return rmWhiteSpace(rule)
+var grammar = Grammar{
+	"and":        "true",
+	"or":         "true",
+	"literal":    "true",
+	"character":  "true",
+	"reference":  "true",
+	"many":       "true",
+	"optional":   "true",
+	"component":  "true",
+	"expression": "true",
 }
 
 // literal -> ' & * & '
@@ -361,36 +341,22 @@ func (g Grammar) Rule(s string) string {
 // 			  | reference
 // 			  | many
 // 			  | optional
-// 			  | { & expression & }
 // expression -> component [ or component ]
 // 			  |  component [ and component ]
 
 func and(s string, n ...string) (bool, string, *Cst) {
-	return Is("&")(s, AND)
+	return Is("&")(s, "and")
 }
 func or(s string, n ...string) (bool, string, *Cst) {
-	return Is("|")(s, OR)
+	return Is("|")(s, "or")
 }
 func literal(s string, n ...string) (bool, string, *Cst) {
 	return And(
 		Is("'"),
 		Many(Wildcard("'")),
 		Is("'"),
-	)(s, LITERAL)
+	)(s, "literal")
 }
-
-func literalToParser(tree *Cst, _ Grammar) Parser {
-	many := tree.nthChild(1)
-
-	literal := ""
-
-	for _, child := range many.children {
-		literal += child.value
-	}
-
-	return Is(literal)
-}
-
 func character(s string, n ...string) (bool, string, *Cst) {
 	return Or(
 		Is("q"), Is("w"), Is("e"), Is("r"), Is("t"), Is("y"), Is("u"),
@@ -400,43 +366,21 @@ func character(s string, n ...string) (bool, string, *Cst) {
 	)(s)
 }
 func reference(s string, n ...string) (bool, string, *Cst) {
-	return OneOrMore(character)(s, REFERENCE)
+	return OneOrMore(character)(s, "reference")
 }
-func referenceToParser(tree *Cst, g Grammar) Parser {
-	name := tree.nthChild(0).nthChild(0).value
-
-	optionalChars := tree.nthChild(1)
-
-	if len(optionalChars.children) > 0 {
-		for _, child := range optionalChars.children {
-			name += child.nthChild(0).value
-		}
-	}
-
-	return g.GetParser(name)
-}
-
 func many(s string, n ...string) (bool, string, *Cst) {
 	return And(
 		Is("["),
 		expression,
 		Is("]"),
-	)(s, MANY)
-}
-func manyToParser(tree *Cst, g Grammar) Parser {
-	child := tree.nthChild(1)
-	return Many(expressionToParser(child, g))
+	)(s, "many")
 }
 func optional(s string, n ...string) (bool, string, *Cst) {
 	return And(
 		Is("("),
 		expression,
 		Is(")"),
-	)(s, OPTIONAL)
-}
-func optionalToParser(tree *Cst, g Grammar) Parser {
-	child := tree.nthChild(1)
-	return Optional(expressionToParser(child, g))
+	)(s, "optional")
 }
 func component(s string, n ...string) (bool, string, *Cst) {
 	return Or(
@@ -444,114 +388,14 @@ func component(s string, n ...string) (bool, string, *Cst) {
 		reference,
 		many,
 		optional,
-		And(Is("{"), expression, Is("}")),
-	)(s, COMPONENT)
+		expression,
+	)(s, "component")
 }
-func componentToParser(tree *Cst, g Grammar) Parser {
-	child := tree.nthChild(0)
-	switch child.typ {
-	case "literal":
-		return literalToParser(child, g)
-	case "expression":
-		return expressionToParser(child, g)
-	case "reference":
-		return referenceToParser(child, g)
-	case "many":
-		return manyToParser(child, g)
-	case "optional":
-		return optionalToParser(child, g)
-	case "And":
-		return expressionToParser(child.nthChild(1), g)
-	}
-
-	debug.PrintStack()
-
-	return nil
-}
-
 func expression(s string, n ...string) (bool, string, *Cst) {
 	return Or(
-		And(component, and, Many(And(component, and)), component),
-		And(component, or, Many(And(component, or)), component),
-		component,
-	)(s, EXPRESSION)
-}
-
-func expressionToParser(tree *Cst, g Grammar) Parser {
-
-	if tree.nthChild(0).typ == "component" {
-		return componentToParser(tree.nthChild(0), g)
-	}
-
-	var children = []Parser{
-		componentToParser(tree.nthChild(0).nthChild(0), g),
-	}
-
-	operator := tree.nthChild(0).nthChild(1).typ
-
-	optionalComponents := tree.nthChild(0).nthChild(2)
-
-	if len(optionalComponents.children) > 0 {
-		for _, child := range optionalComponents.children {
-			optionalComponent := child.nthChild(0)
-			children = append(children,
-				componentToParser(optionalComponent, g))
-		}
-	}
-
-	children = append(children,
-		componentToParser(tree.nthChild(0).nthChild(3), g))
-
-	switch operator {
-	case "or":
-		return Or(children...)
-	case "and":
-		return And(children...)
-	}
-
-	debug.PrintStack()
-	return nil
-}
-
-const AND = "and"
-const OR = "or"
-const LITERAL = "literal"
-const CHARACTER = "character"
-const REFERENCE = "reference"
-const MANY = "many"
-const OPTIONAL = "optional"
-const COMPONENT = "component"
-const EXPRESSION = "expression"
-
-var shorthandMap = map[string]Parser{
-	AND:        and,
-	OR:         or,
-	LITERAL:    literal,
-	CHARACTER:  character,
-	REFERENCE:  reference,
-	MANY:       many,
-	OPTIONAL:   optional,
-	COMPONENT:  component,
-	EXPRESSION: expression,
-}
-
-func (g Grammar) GetParser(s string) Parser {
-	rule := g.Rule(s)
-
-	fmt.Println(s, "=>", rule)
-
-	matches, remainder, tree := expression(rule)
-
-	// fmt.Println(matches, remainder, tree)
-
-	// fmt.Println()
-
-	if matches && len(remainder) == 0 {
-		return expressionToParser(tree, g)
-	} else {
-		fmt.Println("Invalid Expression!")
-		return Is("")
-	}
+		And(component, Many(And(or, component))),
+		And(component, Many(And(and, component))),
+	)(s, "expression")
 }
 
 /////////////////////// Example ////////////////////////
@@ -561,27 +405,75 @@ var math = Grammar{
 	"sign":     ` '+'|'-' `,
 	"operator": " '*'|'/'|'+'|'-'|'^' ",
 	"digits":   "digit & [digit] ",
-	"number": ` { digits & 'e' & digits } | digits 
-			  | { '(' & (sign) & digits & ')' }`,
-	"component":  "number | { '(' & expression & ')' }",
-	"expression": "component & [{operator & component}]",
+	"number": ` digits 
+			  | digits & 'e' & digits
+			  | '(' & (sign) & digits & ')'`,
+	"component":  "number | '(' & expression & ')'",
+	"expression": "component & [operator & component]",
 }
 
-func main() {
-	log := fmt.Println
-
-	log(math.GetParser("digits")("11")) // true
+func (g Grammar) Rule(s string) string {
+	rule := g[s]
+	return rmWhiteSpace(rule)
 }
 
-// var shorthandGrammar = Grammar{
+func rmWhiteSpace(s string) string {
+	s = strings.Replace(s, " ", "", -1)
+	s = strings.Replace(s, "\n", "", -1)
+	s = strings.Replace(s, "\t", "", -1)
+	s = strings.Replace(s, "\r", "", -1)
+	return s
+}
+
+func (g Grammar) GetParser(s string) Parser {
+	rule := g.Rule(s)
+
+	matches, remainder, tree := expression(rule)
+
+	if matches && len(remainder) == 0 {
+		return GenerateParser(tree)
+	} else {
+		return nil
+	}
+}
+
+func GenerateParser(tree *Cst) Parser {
+
+	tree.traverse()
+
+	// func() { fmt.Println("test") }
+
+	return Is("a")
+}
+
+func (tree *Cst) traverse() {
+	// fxn()
+	// fmt.Println(tree.typ)
+	// fmt.Println(tree.children)
+	if tree.children != nil {
+		for child := range tree.childen {
+			// 		child.traverse(fxn)
+		}
+	}
+
+}
+
+
+func main( ) {
+	
+}
+
+
+
+// var grammar = Grammar{
 // 	"operator":   "true",
 // 	"number":     "true",
-// 	COMPONENT:  "true",
-// 	EXPRESSION: "true",
+// 	"component":  "true",
+// 	"expression": "true",
 // }
 
 /*
-	These are strictly defined shorthandGrammar rules that describe all
+	These are strictly defined grammar rules that describe all
 	allowable configurations of elements within an input string.
 
 	Each rule itself is a parser. The rule can be considered totally
@@ -652,7 +544,7 @@ func main() {
 // 	return Or(
 // 		number,
 // 		And(Is("("), expression, Is(")")),
-// 	)(s, COMPONENT)
+// 	)(s, "component")
 // }
 
 // // An expression is a string of components separated by operators
@@ -660,21 +552,21 @@ func main() {
 // 	return And(
 // 		component,
 // 		Many(And(operator, component)),
-// 	)(s, EXPRESSION)
+// 	)(s, "expression")
 // }
 
 /////////////////////////// Main ///////////////////////////////
 
 // func IsValid(rule Parser, s string) bool {
-// matches, remainder, _ := rule(s)
-// return matches && len(remainder) == 0
+	matches, remainder, _ := rule(s)
+	return matches && len(remainder) == 0
 // }
 
 // func Test() {
-// log := fmt.Println
-// log()
-// log(expression("1111+111"))
-// log(isValid(expression, "1+2+3"))       // true
-// log(isValid(expression, "1+2+3+"))      // false
-// log(isValid(expression, "1+(1+(1+1))")) // true
+	// log := fmt.Println
+	// log()
+	// log(expression("1111+111"))
+	// log(isValid(expression, "1+2+3"))       // true
+	// log(isValid(expression, "1+2+3+"))      // false
+	// log(isValid(expression, "1+(1+(1+1))")) // true
 // }
