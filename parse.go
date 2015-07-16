@@ -445,17 +445,30 @@ func GenerateParser(tree *Cst) Parser {
 	return Is("a")
 }
 
+<<<<<<< HEAD
 func (tree *Cst) traverse(fxn func(*Cst)) {
 	fxn(tree)
 	for _, child := range tree.children {
 		child.traverse(fxn)
 	}
+=======
+func isValid(s string, rule Parser) bool {
+	matches, remainder := rule(s)
+	return matches && len(remainder) == 0
+>>>>>>> parent of 6066259... added run info and fixed main
 }
 
 func main() {
 	log := fmt.Println
+<<<<<<< HEAD
 	log("test")
 	log(math.GetParser("digit")("a"))
+=======
+
+	log(expression("1+2+3"))       // true
+	log(expression("1+2+3+"))      // false
+	log(expression("1+(1+(1+1))")) // true
+>>>>>>> parent of 6066259... added run info and fixed main
 }
 
 // var grammar = Grammar{
