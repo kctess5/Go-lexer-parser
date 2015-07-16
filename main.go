@@ -27,6 +27,7 @@ func main() {
 	log := fmt.Println
 
 	log(math.GetParser("expression")("1+1")) // true, '', Cst
+	log(parse.MathExpression("1+1"))
 
 	log(IsValid(math.GetParser("expression"), "1+(1+(1+(1+(1+1))))")) // true
 }
