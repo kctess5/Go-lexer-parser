@@ -11,18 +11,6 @@ import (
 	Utils
 */
 
-var prettyPrint = Grammar{
-	"and":        "true",
-	"or":         "true",
-	"literal":    "true",
-	"character":  "true",
-	"reference":  "true",
-	"many":       "true",
-	"optional":   "true",
-	"component":  "true",
-	"expression": "true",
-}
-
 func chooseName(s []string, dflt string) string {
 	if len(s) > 0 {
 		return s[0]
