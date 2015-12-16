@@ -9,10 +9,12 @@
     "npm-watch": "0.0.0"
   },
   "scripts": {
-    "go": "go run parse.go",
+    "go": "go run main.go",
+    "test": "go test ./parse",
     "watch": "npm-watch"
   },
   "watch": {
-    "go": "parse.go"
+    "go": "main.go",
+    "test": "parse/parse_test.go"
   }
 }

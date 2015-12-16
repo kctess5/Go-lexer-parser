@@ -21,7 +21,7 @@ func (g Grammar) has(i string) bool {
 
 func (g Grammar) Rule(s string) string {
 	rule := g[s]
-	return rmWhiteSpace(rule)
+	return RmWhiteSpace(rule)
 }
 
 var parserCache = map[string]Parser{}
@@ -37,29 +37,34 @@ func (g Grammar) GetParser(s string) Parser {
 
 	if v, ok := parserCache[s]; ok {
 		if v == nil {
-			return func(ps string, n ...string) (bool, string, *Cst) {
+			return func(l *Lexer, n ...string) (bool, *Cst) {
 				// we must defer the access of the map until parser
 				// runtime, otherwise recursively defined grammars
 				// would not ever finish compiling
-				return parserCache[s](ps, n...)
+				return parserCache[s](l, s)
 			}
 		} else {
-			return v
+			return func(l *Lexer, n ...string) (bool, *Cst) {
+				return v(l, s) // pass the name of the parser
+			}
 		}
 	}
 
-	rule := g.Rule(s)
-	matches, remainder, tree := expression(rule)
+	lex := NewLexer(g.Rule(s))
+	matches, tree := expression(lex)
 
 	if verbose {
-		fmt.Println("Generating Parser: ", s, "=>", rule)
+		fmt.Println("Generating Parser: ", s, "=>", g.Rule(s))
 	}
 
 	parserCache[s] = nil
 
-	if matches && len(remainder) == 0 {
+	if matches && lex.left() == 0 {
 		parserCache[s] = expressionToParser(tree, g)
-		return parserCache[s]
+
+		return func(l *Lexer, n ...string) (bool, *Cst) {
+			return parserCache[s](l, s) // pass the name of the parser
+		}
 	} else {
 		fmt.Println("Invalid Parser Expression!")
 		return nil
@@ -92,6 +97,7 @@ func (g Grammar) GetParser(s string) Parser {
 // many -> [ & expression & ]
 // and -> "&"
 // or -> "|"
+// wildcard -> "* & literal"
 // optional -> ( & expression & )
 // component -> literal
 // 			  | expression
@@ -99,44 +105,76 @@ func (g Grammar) GetParser(s string) Parser {
 // 			  | many
 // 			  | optional
 // 			  | { & expression & }
+// 			  | wildcard
 // expression -> component [ or component ]
 // 			  |  component [ and component ]
 
-func and(s string, n ...string) (bool, string, *Cst) {
-	return Is("&")(s, "and")
+func wildcard(l *Lexer, n ...string) (bool, *Cst) {
+	return And(Is(`*`), literal)(l, "wildcard")
 }
-func or(s string, n ...string) (bool, string, *Cst) {
-	return Is("|")(s, "or")
+
+func wildcardToParser(tree *Cst, _ Grammar) Parser {
+	exclusions := tree.nthChild(1).nthChild(1)
+
+	except := ""
+
+	for _, child := range exclusions.children {
+		except += child.value
+	}
+
+	return Wildcard(except)
 }
-func character(s string, n ...string) (bool, string, *Cst) {
+
+func and(l *Lexer, n ...string) (bool, *Cst) {
+	return Is("&")(l, "and")
+}
+func or(l *Lexer, n ...string) (bool, *Cst) {
+	return Is("|")(l, "or")
+}
+func character(l *Lexer, n ...string) (bool, *Cst) {
 	return Or(
 		Is("q"), Is("w"), Is("e"), Is("r"), Is("t"), Is("y"), Is("u"),
 		Is("i"), Is("o"), Is("p"), Is("a"), Is("s"), Is("d"), Is("f"),
 		Is("g"), Is("h"), Is("j"), Is("k"), Is("l"), Is("z"), Is("x"),
 		Is("c"), Is("v"), Is("b"), Is("n"), Is("m"),
-	)(s)
+	)(l, "character")
 }
 
-func literal(s string, n ...string) (bool, string, *Cst) {
+func literal(l *Lexer, n ...string) (bool, *Cst) {
 	return And(
 		Is("'"),
 		Many(Wildcard("'")),
 		Is("'"),
-	)(s, "literal")
+	)(l, "literal")
 }
+
+// func literalToParser(tree *Cst, _ Grammar) Parser {
+// 	many := tree.nthChild(1)
+// 	lit := ""
+
+// 	for _, child := range many.children {
+// 		lit += child.value
+// 	}
+// 	return Is(lit)
+// }
+
 func literalToParser(tree *Cst, _ Grammar) Parser {
 	many := tree.nthChild(1)
-	literal := ""
+
+	characterParsers := []Parser{}
+
+	// literal := ""
 
 	for _, child := range many.children {
-		literal += child.value
+		characterParsers = append(characterParsers, Is(child.value))
 	}
-	return Is(literal)
+	return And(characterParsers...)
 }
 
-func reference(s string, n ...string) (bool, string, *Cst) {
-	return OneOrMore(character)(s, "reference")
+func reference(l *Lexer, n ...string) (bool, *Cst) {
+	return OneOrMore(character)(l, "reference")
 }
+
 func referenceToParser(tree *Cst, g Grammar) Parser {
 	name := tree.nthChild(0).nthChild(0).value
 	optionalChars := tree.nthChild(1)
@@ -149,39 +187,43 @@ func referenceToParser(tree *Cst, g Grammar) Parser {
 	return g.GetParser(name)
 }
 
-func many(s string, n ...string) (bool, string, *Cst) {
+func many(l *Lexer, n ...string) (bool, *Cst) {
 	return And(
 		Is("["),
 		expression,
 		Is("]"),
-	)(s, "many")
+	)(l, "many")
 }
+
 func manyToParser(tree *Cst, g Grammar) Parser {
 	child := tree.nthChild(1)
 	return Many(expressionToParser(child, g))
 }
 
-func optional(s string, n ...string) (bool, string, *Cst) {
+func optional(l *Lexer, n ...string) (bool, *Cst) {
 	return And(
 		Is("("),
 		expression,
 		Is(")"),
-	)(s, "optional")
+	)(l, "optional")
 }
+
 func optionalToParser(tree *Cst, g Grammar) Parser {
 	child := tree.nthChild(1)
 	return Optional(expressionToParser(child, g))
 }
 
-func component(s string, n ...string) (bool, string, *Cst) {
+func component(l *Lexer, n ...string) (bool, *Cst) {
 	return Or(
 		literal,
 		reference,
 		many,
 		optional,
+		wildcard,
 		And(Is("{"), expression, Is("}")),
-	)(s, "component")
+	)(l, "component")
 }
+
 func componentToParser(tree *Cst, g Grammar) Parser {
 	child := tree.nthChild(0)
 	switch child.typ {
@@ -195,6 +237,8 @@ func componentToParser(tree *Cst, g Grammar) Parser {
 		return manyToParser(child, g)
 	case "optional":
 		return optionalToParser(child, g)
+	case "wildcard":
+		return wildcardToParser(child, g)
 	case "And":
 		return expressionToParser(child.nthChild(1), g)
 	}
@@ -204,13 +248,14 @@ func componentToParser(tree *Cst, g Grammar) Parser {
 	return nil
 }
 
-func expression(s string, n ...string) (bool, string, *Cst) {
+func expression(l *Lexer, n ...string) (bool, *Cst) {
 	return Or(
 		And(component, and, Many(And(component, and)), component),
 		And(component, or, Many(And(component, or)), component),
 		component,
-	)(s, "expression")
+	)(l, "expression")
 }
+
 func expressionToParser(tree *Cst, g Grammar) Parser {
 	if tree.nthChild(0).typ == "component" {
 		return componentToParser(tree.nthChild(0), g)

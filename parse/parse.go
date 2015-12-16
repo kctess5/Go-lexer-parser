@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
@@ -46,7 +47,7 @@ func (t Cst) String() string {
 	return output
 }
 
-func rmWhiteSpace(s string) string {
+func RmWhiteSpace(s string) string {
 	s = strings.Replace(s, " ", "", -1)
 	s = strings.Replace(s, "\n", "", -1)
 	s = strings.Replace(s, "\t", "", -1)
@@ -75,10 +76,70 @@ func rmWhiteSpace(s string) string {
 	matched sequence.
 */
 
-type Parser func(string, ...string) (bool, string, *Cst)
+type Parser func(*Lexer, ...string) (bool, *Cst)
 type ParserCombinator func(...Parser) Parser
 
-// type ParserResponse (bool, string, *Cst)
+type Lexer struct {
+	input    string
+	position int
+}
+
+var UpCounter int
+var DownCounter int
+
+func (l *Lexer) advance(n int) {
+	if n > 0 {
+		UpCounter += n
+	}
+	l.position += n
+}
+
+func (l *Lexer) scanTo(n int) {
+	if l.position-n > 0 {
+		DownCounter += l.position - n
+	}
+	l.position = n
+}
+
+func (l *Lexer) pos() int {
+	return l.position
+}
+
+func (l *Lexer) peek(n int) string {
+	return l.input[l.position : l.position+n]
+}
+
+func (l *Lexer) left() int {
+	return len(l.input) - l.position
+}
+
+func (l *Lexer) Done() bool {
+	return l.left() == 0
+}
+
+func (l *Lexer) remainder() string {
+	if l.left() > 0 {
+		return l.peek(l.left())
+	} else {
+		return ""
+	}
+}
+
+func (l *Lexer) peekNextRune() (rune, int) {
+	if l.left() >= 5 {
+		return utf8.DecodeRuneInString(l.peek(5))
+	} else {
+		return utf8.DecodeRuneInString(l.remainder())
+	}
+}
+
+func (l *Lexer) Reset() {
+	l.position = 0
+}
+
+func NewLexer(s string) *Lexer {
+	return &Lexer{s, 0}
+}
 
 type Cst struct {
 	typ      string
@@ -106,95 +167,105 @@ func (a *Cst) nthChild(n int) *Cst {
 }
 
 // matches if the input string equals the given literal
-func Wildcard(except string) Parser {
-	return func(s string, n ...string) (bool, string, *Cst) {
-		name := chooseName(n, nameOf(Wildcard))
-		node := NewCst(name)
-
-		r, w := utf8.DecodeRuneInString(s)
-
-		if w == 0 || strings.ContainsRune(except, r) {
-			return false, s, nil
-		} else {
-			node.value = string(r)
-			return true, s[w:], node
-		}
-	}
-}
-
-// matches if the input string equals the given literal
 func Is(literal string) Parser {
-	return func(s string, n ...string) (bool, string, *Cst) {
+	return func(l *Lexer, n ...string) (bool, *Cst) {
 		// string is too short, fail
-		if len(literal) > len(s) {
-			return false, s, nil
+		if len(literal) > l.left() {
+			return false, nil
 		}
 
-		inp := s[0:len(literal)] // substring of correct length
+		inp := l.peek(len(literal)) // substring of correct length
 
 		if inp == literal {
 			name := chooseName(n, nameOf(Is))
 			node := NewCst(name)
 			node.value = literal
-			// is a match, shorten string
-			return true, s[len(literal):], node
+
+			l.advance(len(literal)) // is a match, shorten string
+
+			return true, node
 		} else {
 			// not a match, fail
-			return false, s, nil
+			return false, nil
+		}
+	}
+}
+
+// matches if the input string equals the given literal
+func Wildcard(except string) Parser {
+	return func(l *Lexer, n ...string) (bool, *Cst) {
+		name := chooseName(n, nameOf(Wildcard))
+		node := NewCst(name)
+
+		r, w := l.peekNextRune()
+
+		// fmt.Println(r, w, strings.ContainsRune(except, r))
+
+		if w == 0 || strings.ContainsRune(except, r) {
+			return false, nil
+		} else {
+			node.value = string(r)
+			l.advance(w)
+
+			return true, node
 		}
 	}
 }
 
 // matches if any one of the given parsers match
 func Or(parsers ...Parser) Parser {
-	return func(s string, n ...string) (bool, string, *Cst) {
+	return func(l *Lexer, n ...string) (bool, *Cst) {
 		name := chooseName(n, nameOf(Or))
 		node := NewCst(name)
 
 		for _, parser := range parsers {
 			// test the given parser
-			matches, remainder, child := parser(s)
+			start := l.pos()
+			matches, child := parser(l)
+
 			if matches {
 				// tree.typ = nameOf(parser)
 				node.addChild(child)
 				// returns once first parser matches, skips rest
-				return true, remainder, node
+				return true, node
+			} else {
+				l.scanTo(start)
 			}
 		}
 		// if it has not returned by now, none of the given parsers
 		// match, fail
-		return false, s, nil
+		return false, nil
 	}
 }
 
 // matches if all of the given parsers match
 func And(parsers ...Parser) Parser {
-	return func(s string, n ...string) (bool, string, *Cst) {
+	return func(l *Lexer, n ...string) (bool, *Cst) {
 		name := chooseName(n, nameOf(And))
 		node := NewCst(name)
 
 		var matches bool
-		var remainder string
 		var child *Cst
-
-		remainder = s
 
 		for _, parser := range parsers {
 			// test each test, sequentially - i.e. the remainder
 			// from the first test is given to the second test, etc
-			matches, remainder, child = parser(remainder)
+
+			start := l.pos()
+
+			matches, child = parser(l)
 
 			if !matches {
+				l.scanTo(start)
+
 				// if any test fails, the whole thing fails
-				return false, s, nil
+				return false, nil
+			} else {
+				node.addChild(child)
 			}
-
-			// tree.typ = nameOf(parser)
-
-			node.addChild(child)
 		}
 		// no test failed, match - return the final remainder
-		return true, remainder, node
+		return true, node
 	}
 }
 
@@ -204,51 +275,94 @@ func And(parsers ...Parser) Parser {
     Many(Is("a"))("aaaaaaa") ==> (true, "")
 */
 func Many(parser Parser) Parser {
-	return func(s string, n ...string) (bool, string, *Cst) {
+	return func(l *Lexer, n ...string) (bool, *Cst) {
 		name := chooseName(n, nameOf(Many))
 		node := NewCst(name)
 
 		var matches bool
-		var remainder string
 		var child *Cst
 
-		remainder = s
 		matches = true
 
 		// keeps iterating until the given parser no longer matches
 		// feed the remainder forward so that it chomps as it goes
-		for matches && len(remainder) > 0 {
-			matches, remainder, child = parser(remainder)
+		for matches && l.left() > 0 {
+			start := l.pos()
+			matches, child = parser(l)
+
 			if matches {
 				node.addChild(child)
+			} else {
+				l.scanTo(start)
 			}
 		}
 
 		// return whatever remains in the string
-		return true, remainder, node
+		return true, node
 	}
 }
 
 // matches whether or not the given parser activates
 func Optional(parser Parser) Parser {
-	return func(s string, n ...string) (bool, string, *Cst) {
+	return func(l *Lexer, n ...string) (bool, *Cst) {
 		name := chooseName(n, nameOf(Optional))
 		node := NewCst(name)
-		matches, remainder, child := parser(s)
+
+		start := l.pos()
+		matches, child := parser(l)
 
 		if matches {
 			node.addChild(child)
-			return true, remainder, node
+			return true, node
 		} else {
-			return true, s, node
+			l.scanTo(start)
+			return true, node
 		}
 	}
 }
 
-// matches [1...] instances of the given parser
+// // matches [1...] instances of the given parser
 func OneOrMore(parser Parser) Parser {
 	return And(
 		parser,       // mandatory match
 		Many(parser), // 0 or  subsequent matches
 	)
+}
+
+func StringParser(p Parser) func(string) (bool, *Cst) {
+	return func(s string) (bool, *Cst) {
+		l := NewLexer(s)
+
+		matches, tree := p(l)
+
+		if matches && l.left() == 0 {
+			return true, tree
+		} else {
+			fmt.Println("Remainder:", l.remainder()) // l.chomp(l.left()))
+			return false, nil
+		}
+	}
+}
+
+func Test() {
+	// fmt.Println(StringParser(
+	// 	Many(Is("a")),
+	// )(`aa`))
+
+	// Many(And(literal, or))
+
+	// matches, _ := StringParser(
+	// 	Or(
+	// 		Many(And(Or(Is("x"), literal), or)),
+	// 		Many(And(literal, or)),
+	// 	),
+	// )(`'0'|'1'|'2'|'3'|x|'5'|'6'|'7'|'8'|'9'|`)
+
+	matches, _ := StringParser(
+		expression,
+	)(`'0'`)
+
+	fmt.Println(matches)
+	// fmt.Println(StringParser(Is("test"))("test"))
+	// fmt.Println(StringParser(Is("a"))("b"))
 }
