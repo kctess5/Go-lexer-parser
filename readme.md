@@ -2,7 +2,7 @@
 
 This repo is a simple parser combinator implementation in Go.
 
-In [parse.go](./parse/shorthand.go) you will find the real brains of the repo:
+In [parse.go](./parse/parse.go) you will find the real brains of the repo:
 
 ```
 Is, Wildcard, Or, And, Many, Optional, OneOrMore
